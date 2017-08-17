@@ -50,3 +50,11 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+# Upload scripts
+upload.sh
+upload.log
+
+*.img
+bin/
+boot/boot
