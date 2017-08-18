@@ -1,5 +1,5 @@
-#ifndef _LIB_COM_H_
-#define _LIB_COM_H_
+#ifndef _PUB_COM_H_
+#define _PUB_COM_H_
 
 #ifdef __GNUC__
 	#if (__GNUC__ > 3) || ((__GNUC__ == 3) && (__GNUC_MINOR__ >= 1))
@@ -15,7 +15,8 @@
 	#define C0RE_INLINE static inline
 #endif
 
-#define C0RE_PACKED __attribute__ ((packed));
+#define C0RE_PACKED __attribute__ ((packed))
+#define C0RE_ARRLEN(arr) (sizeof(arr) / sizeof(*(arr)))
 
 #ifndef NULL
     #define NULL ((void *)0)
@@ -26,8 +27,8 @@
 
 typedef int bool;
 
-#define FALSE ((bool)0)
-#define TRUE ((bool)1)
+#define false ((bool)0)
+#define true ((bool)1)
 
 typedef char                int8_t;
 typedef unsigned char       uint8_t;

@@ -1,5 +1,5 @@
-#ifndef _LIB_ELF_H_
-#define _LIB_ELF_H_
+#ifndef _PUB_ELF_H_
+#define _PUB_ELF_H_
 
 #include "pub/com.h"
 

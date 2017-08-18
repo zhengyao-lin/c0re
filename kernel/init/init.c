@@ -1,7 +1,22 @@
 #include "lib/debug.h"
+#include "mem/pmm.h"
+#include "intr/trap.h"
+#include "driver/pic.h"
+#include "driver/clock.h"
 
-int c0re_init() {
-    kinit();
+void c0re_init() {
+    cons_init();
+    
     trace("hello, c0re");
-    return 0;
+    
+    pmm_init();
+    
+    pic_init();
+    idt_init();
+    
+    intr_enable();
+    
+    clock_init();
+    
+    while (1) ;
 }

@@ -43,6 +43,9 @@ debug: img
 	sleep 2
 	$(TERMINAL) -e "gdb -q -tui -x tool/gdbinit"
 
+run: img
+	$(QEMU) -hda $(FINAL)
+
 clean: NOSKIP
 	cd pub; make clean
 	cd kernel; make clean

@@ -4,8 +4,12 @@
 #include "driver/console.h"
 #include "lib/io.h"
 
-#define trace(msg) \
-    kputs(msg); \
+#define trace(...) \
+    kprintf(__VA_ARGS__); \
     kputc('\n')
+    
+void _panic(char *file, int line, const char *fmt, ...);
+
+#define panic(...) _panic(__FILE__, __LINE__, __VA_ARGS__)
 
 #endif

@@ -1,5 +1,5 @@
-#ifndef _LIB_STRING_H_
-#define _LIB_STRING_H_
+#ifndef _PUB_STRING_H_
+#define _PUB_STRING_H_
 
 #include "pub/com.h"
 

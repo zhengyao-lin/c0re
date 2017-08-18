@@ -5,12 +5,15 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#define err(...) \
+#define err(...)                     \
     fprintf(stderr, "sign error: "); \
-    fprintf(stderr, __VA_ARGS__); \
+    fprintf(stderr, __VA_ARGS__);    \
     fprintf(stderr, "\n");
     
-#define trace err
+#define trace(...) \
+    fprintf(stderr, "sign: ");    \
+    fprintf(stderr, __VA_ARGS__); \
+    fprintf(stderr, "\n");
 
 int main(int argc, char **argv)
 {

@@ -16,7 +16,7 @@ $(FINAL): boot.o
 boot.o: $(OBJS)
 	$(LD) $(LDFLAGS) -N -e start -Ttext 0x7C00 -o boot.o $(OBJS)
 	
-bootasm.o: bootasm.S bootasm.h
+bootasm.o: bootasm.S
 	$(CC) $(CFLAGS) -o bootasm.o bootasm.S
 
 bootc.o: bootc.c

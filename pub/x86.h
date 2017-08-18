@@ -1,9 +1,23 @@
-#ifndef _LIB_X86_H_
-#define _LIB_X86_H_
+#ifndef _PUB_X86_H_
+#define _PUB_X86_H_
 
 #include "pub/com.h"
 
-// original do_div removed
+// TODO: why do we need this?? (required in printfmt)
+#define do_div(n, base) ({                                   \
+        unsigned long __upper, __low, __high, __mod, __base; \
+        __base = (base);                                     \
+        asm("" : "=a" (__low), "=d" (__high) : "A" (n));     \
+        __upper = __high;                                    \
+        if (__high != 0) {                                   \
+            __upper = __high % __base;                       \
+            __high = __high / __base;                        \
+        }                                                    \
+        asm("divl %2" : "=a" (__low), "=d" (__mod)           \
+            : "rm" (__base), "0" (__low), "1" (__upper));    \
+        asm("" : "=A" (n) : "a" (__low), "d" (__high));      \
+        __mod;                                               \
+    })
 
 C0RE_INLINE uint8_t inb(uint16_t port);
 C0RE_INLINE void insl(uint32_t port, void *addr, int cnt);
@@ -11,16 +25,18 @@ C0RE_INLINE void outb(uint16_t port, uint8_t data);
 C0RE_INLINE void outw(uint16_t port, uint16_t data);
 C0RE_INLINE uint32_t read_ebp(void);
 
-/* Pseudo-descriptors used for LGDT, LLDT(not used) and LIDT instructions. */
-struct pseudodesc {
+/* argument used for LGDT, LLDT(not used) and LIDT instructions. */
+typedef struct {
     uint16_t pd_lim;        // Limit
     uint32_t pd_base;        // Base address
-} C0RE_PACKED;
+} C0RE_PACKED descloader_t;
 
-C0RE_INLINE void lidt(struct pseudodesc *pd);
+C0RE_INLINE void lidt(descloader_t *pd);
 C0RE_INLINE void sti(void);
 C0RE_INLINE void cli(void);
 C0RE_INLINE void ltr(uint16_t sel);
+
+C0RE_INLINE void hlt();
 
 /* INPUT byte */
 C0RE_INLINE
@@ -68,7 +84,7 @@ uint32_t read_ebp()
 
 /* load IDT */
 C0RE_INLINE
-void lidt(struct pseudodesc *pd)
+void lidt(descloader_t *pd)
 {
     asm volatile ("lidt (%0)" :: "r" (pd));
 }
@@ -89,6 +105,12 @@ C0RE_INLINE
 void ltr(uint16_t sel)
 {
     asm volatile ("ltr %0" :: "r" (sel));
+}
+
+C0RE_INLINE
+void hlt()
+{
+    asm volatile ("hlt");
 }
 
 C0RE_INLINE int __strcmp(const char *s1, const char *s2);

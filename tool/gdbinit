@@ -1,4 +1,4 @@
-file kernel.elf
+file bin/kernel.elf
 target remote :1234
 break c0re_init
 continue
