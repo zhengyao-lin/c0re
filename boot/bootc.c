@@ -6,14 +6,13 @@
 #define ELFHDR          ((struct elfhdr *)0x10000)      // scratch space
 
 /* waitdisk - wait for disk ready */
-static void
-waitdisk()
+static void waitdisk()
 {
     while ((inb(0x1F7) & 0xC0) != 0x40) ;
 }
 
 /* readsect - read a single sector at @secno into @dst */
-static void
+C0RE_INLINE void
 readsect(void *dst, uint32_t secno)
 {
     // wait for disk to be ready
@@ -72,7 +71,8 @@ void bootmain()
     // load each program segment (ignores ph flags)
     ph = (struct proghdr *)((uintptr_t)ELFHDR + ELFHDR->e_phoff);
     eph = ph + ELFHDR->e_phnum;
-    for (; ph < eph; ph ++) {
+    
+    for (; ph < eph; ph++) {
         readseg(ph->p_va & 0xFFFFFF, ph->p_memsz, ph->p_offset);
     }
 

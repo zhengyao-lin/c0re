@@ -8,6 +8,8 @@
 #include "driver/pic.h"
 #include "driver/kbdreg.h"
 
+#include "mem/mmu.h"
+
 /* stupid I/O delay routine necessitated by historical PC design flaws */
 C0RE_INLINE
 void delay(void)
@@ -65,13 +67,14 @@ static uint16_t addr_6845;
 /* TEXT-mode CGA/VGA display output */
 static void cga_init(void)
 {
-    volatile uint16_t *cp = (uint16_t *)CGA_BUF;   //CGA_BUF: 0xB8000 (彩色显示的显存物理基址)
+    volatile uint16_t *cp = (uint16_t *)(CGA_BUF + KERNEL_BASE);
+                                                   //CGA_BUF: 0xB8000 (彩色显示的显存物理基址)
     uint16_t was = *cp;                            //保存当前显存0xB8000处的值
     
     *cp = (uint16_t) 0xA55A;                       // 给这个地址随便写个值，看看能否再读出同样的值
     
     if (*cp != 0xA55A) {                           // 如果读不出来，说明没有这块显存，即是单显配置
-        cp = (uint16_t*)MONO_BUF;                  // 设置为单显的显存基址 MONO_BUF： 0xB0000
+        cp = (uint16_t*)(MONO_BUF + KERNEL_BASE);  // 设置为单显的显存基址 MONO_BUF： 0xB0000
         addr_6845 = MONO_BASE;                     // 设置为单显控制的IO地址，MONO_BASE: 0x3B4
     } else {                                       // 如果读出来了，有这块显存，即是彩显配置
         *cp = was;                                 //还原原来显存位置的值

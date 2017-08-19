@@ -3,14 +3,17 @@
 export BASE := $(PWD)
 
 export CC := gcc
+export OBJCOPY := objcopy
+export TERMINAL := gnome-terminal
+export QEMU := qemu-system-i386
+
 export INCLUDES := $(BASE)
-export CFLAGS := -Wall -c -g -ggdb -fno-stack-protector -fno-builtin -m32 -nostdinc -I$(INCLUDES) -Os
+export CFLAGS := -Wall -c -g -ggdb -m32 -I$(INCLUDES) -fno-builtin -fno-stack-protector -Os -nostdinc
 export LDFLAGS := -nostdlib -m $(shell $(LD) -V | grep elf_i386 2>/dev/null)
 
-export OUTPUT := $(BASE)/bin
+export QEMUOPTS := -m 4096
 
-TERMINAL := gnome-terminal
-QEMU := qemu-system-i386
+export OUTPUT := $(BASE)/bin
 
 FINAL := $(OUTPUT)/c0re.img
 
@@ -39,12 +42,12 @@ tool: output
 	cd tool; make
 
 debug: img
-	$(QEMU) -S -s -parallel stdio -hda $(FINAL) -serial null &
+	$(QEMU) -S -s -parallel stdio -hda $(FINAL) -serial null $(QEMUOPTS) &
 	sleep 2
 	$(TERMINAL) -e "gdb -q -tui -x tool/gdbinit"
 
 run: img
-	$(QEMU) -hda $(FINAL)
+	$(QEMU) -hda $(FINAL) $(QEMUOPTS)
 
 clean: NOSKIP
 	cd pub; make clean

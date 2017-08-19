@@ -1,7 +1,5 @@
 # boot loader
 
-OBJCOPY := objcopy
-
 FINAL := boot
 OBJS := bootasm.o bootc.o
 
@@ -14,7 +12,7 @@ $(FINAL): boot.o
 	$(OBJCOPY) -S -O binary boot.o $(FINAL)
 	
 boot.o: $(OBJS)
-	$(LD) $(LDFLAGS) -N -e start -Ttext 0x7C00 -o boot.o $(OBJS)
+	$(LD) $(LDFLAGS) -N -e start -T $(BASE)/tool/boot.ld -o boot.o $(OBJS)
 	
 bootasm.o: bootasm.S
 	$(CC) $(CFLAGS) -o bootasm.o bootasm.S

@@ -81,4 +81,4 @@ typedef size_t ppn_t;
 #define to_struct(ptr, type, member) \
     ((type *)((char *)(ptr) - offsetof(type, member)))
 
-#endif // _LIB_COM_H_
+#endif

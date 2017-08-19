@@ -8,6 +8,8 @@
 .set PROT_MODE_CSEG,        8                       # kernel code segment selector
 .set PROT_MODE_DSEG,        16                      # kernel data segment selector
 .set CR0_PE_ON,             0x1                     # protected mode enable flag
+.set SMAP,                  0x534d4150              # just a signature for INT15h
+.set ARD_SIZE,              20                      # address range descriptor size
 
 # start address should be 0:7c00, in real mode, the beginning address of the running bootloader
 .globl start
@@ -15,25 +17,8 @@ start:
 
 .code16                                             # 16-bit mode
 
-    # test output
-    # mov $0x7c0, %ax
-    # mov %ax, %ds
-    # mov %ax, %es
-    #   
-    # mov $msg, %ax
-    # mov %ax, %bp
-    # mov $0x13, %ah
-    # mov $0, %al
-    # mov $0, %bh
-    # mov $0xFC, %bl
-    # mov $10, %cx
-    # mov $1, %dx
-    # int $0x10
-    # 
-    # hlt
-
-    cli                                             # Disable interrupts
-    cld                                             # String operations increment
+    cli                                             # disable interrupts
+    cld                                             # string operations increment
 
     # set up the important data segment registers (DS, ES, SS).
     xorw %ax, %ax                                   # Segment number zero
@@ -57,6 +42,30 @@ seta20.2:
 
     movb $0xdf, %al                                 # 0xdf -> port 0x60
     outb %al, $0x60                                 # 0xdf = 11011111, means set P2's A20 bit(the 1 bit) to 1
+
+    # probe memory
+probe_memory:
+    movl $0, 0x8000
+    xorl %ebx, %ebx             # first time calling INT15h -> 0, else the last value after calling it
+    movw $0x8004, %di           # es:di specifies the location to store the descriptor(line 42, es has already been set to 0)
+
+start_probe:
+    movl $0xe820, %eax          # just an argument for this function(in INT15h)
+    movl $ARD_SIZE, %ecx        # size of the address range descriptor
+    movl $SMAP, %edx            # signature
+    int $0x15
+    
+    jnc cont                    # success -> jump to continue
+    movw $12345, 0x8000         # not success!
+    jmp finish_probe            # TODO: expect to do something??
+    
+cont:
+    addw $ARD_SIZE, %di         # next descriptor address
+    incl 0x8000                 # number of descriptors
+    cmpl $0, %ebx               # if ebx is 0 -> probe finished
+    jnz start_probe
+    
+finish_probe:
 
     # switch from real to protected mode, using a bootstrap GDT
     # and segment translation that makes virtual addresses
@@ -91,16 +100,15 @@ protcseg:
     # TODO: not sure if we can change the spin to halt
     hlt
 
+.data
+
 # bootstrap GDT
 .p2align 2                                          # force 4 byte alignment
 gdt:
-    SEG_NULLASM                                     # null seg
-    SEG_ASM(STA_X | STA_R, 0x0, 0xffffffff)         # code seg for bootloader and kernel, offset PROT_MODE_CSEG
-    SEG_ASM(STA_W, 0x0, 0xffffffff)                 # data seg for bootloader and kernel, offset PROT_MODE_DSEG
+    GDT_SEGNULL_ASM                                 # null seg
+    GDT_SEG_ASM(STA_X | STA_R, 0x0, 0xffffffff)     # code seg for bootloader and kernel, offset PROT_MODE_CSEG
+    GDT_SEG_ASM(STA_W, 0x0, 0xffffffff)             # data seg for bootloader and kernel, offset PROT_MODE_DSEG
 
 gdtdesc:
     .short 23                                       # sizeof(gdt) - 1 = 24 - 1 = 23
     .int gdt                                        # address gdt
-    
-msg:
-    .ascii "123"

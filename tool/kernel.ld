@@ -3,11 +3,11 @@
 
 OUTPUT_FORMAT("elf32-i386", "elf32-i386", "elf32-i386")
 OUTPUT_ARCH(i386)
-ENTRY(c0re_init)
+ENTRY(c0re_entry)
 
 SECTIONS {
 	/* Load the kernel at this address: "." means the current address */
-	. = 0x100000;
+	. = 0xC0100000;
 
 	.text : {
 		*(.text .stub .text.* .gnu.linkonce.t.*)
@@ -44,13 +44,13 @@ SECTIONS {
 		*(.data)
 	}
 
-	PROVIDE(edata = .);
+	/* PROVIDE(bss_begin = .); */
 
 	.bss : {
 		*(.bss)
 	}
 
-	PROVIDE(end = .);
+	/* PROVIDE(bss_end = .); */
 
 	/DISCARD/ : {
 		*(.eh_frame .note.GNU-stack)

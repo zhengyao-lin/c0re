@@ -230,4 +230,4 @@ void *__memcpy(void *dst, const void *src, size_t n)
 
 #endif /* __HAVE_ARCH_MEMCPY */
 
-#endif // _LIB_X86_H_
+#endif

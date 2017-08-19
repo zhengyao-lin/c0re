@@ -36,5 +36,4 @@ struct proghdr {
     uint32_t p_align;  // required alignment, invariably hardware page size
 };
 
-#endif /* _LIB_ELF_H_ */
-
+#endif
