@@ -12,4 +12,11 @@ void _panic(char *file, int line, const char *fmt, ...);
 
 #define panic(...) _panic(__FILE__, __LINE__, __VA_ARGS__)
 
+#define assert(cond) \
+    if (!(cond)) { \
+        panic("assertion error: %s\n", #cond); \
+    }
+    
+#define DBG_TAB "   "
+
 #endif

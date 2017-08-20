@@ -13,17 +13,16 @@ void c0re_init() {
     
     cons_init();
 
-    trace("hello, c0re");
+    trace("c0re starting");
     
     // TODO !!!
-    // pmm_init();
+    pmm_init();
     
-    // pic_init();
-    // idt_init();
-    // 
-    // intr_enable();
-    // 
-    // clock_init();
+    pic_init();
+    idt_init();
+    clock_init();
+ 
+    intr_enable();
     
     while (1) ;
 }

@@ -1,0 +1,15 @@
+megs: 1024
+
+romimage: file=$BXSHARE/BIOS-bochs-latest  
+vgaromimage: file=$BXSHARE/VGABIOS-lgpl-latest
+  
+# what disk images will be used  
+ata0-master: type=disk, path="bin/c0re.img", mode=flat, cylinders=1, heads=1, spt=1
+
+gdbstub: enabled=1, port=1234, text_base=0, data_base=0, bss_base=0
+
+# choose the boot disk
+boot: disk
+
+# where do we send log messages?
+# log: bochsout.txt

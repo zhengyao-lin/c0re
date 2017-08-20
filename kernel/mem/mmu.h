@@ -164,6 +164,14 @@
             (unsigned)(lim) >> 16, 0, 0, 1, 0,      \
             (unsigned)(base) >> 24                  \
         })
+    
+    #define GDT_SEG_TSS(type, base, lim, dpl)       \
+        ((segdesc_t) {                              \
+            (lim) & 0xffff, (base) & 0xffff,        \
+            ((base) >> 16) & 0xff, type, 0, dpl, 1, \
+            (unsigned)(lim) >> 16, 0, 0, 1, 0,      \
+            (unsigned)(base) >> 24                  \
+        })
 
     /* task state segment format (as described by the Pentium architecture book) */
     typedef struct {
@@ -246,85 +254,149 @@
 #define KERNEL_STACKPAGE       2                                    // # of pages in kernel stack
 #define KERNEL_STACKSIZE       (KERNEL_STACKPAGE * KERNEL_PGSIZE)   // sizeof kernel stack
 
-// // A linear address 'la' has a three-part structure as follows:
-// //
-// // +--------10------+-------10-------+---------12----------+
-// // | Page Directory |   Page Table   | Offset within Page  |
-// // |      Index     |     Index      |                     |
-// // +----------------+----------------+---------------------+
-// //  \--- PDX(la) --/ \--- PTX(la) --/ \---- PGOFF(la) ----/
-// //  \----------- PPN(la) -----------/
-// //
-// // The PDX, PTX, PGOFF, and PPN macros decompose linear addresses as shown.
-// // To construct a linear address la from PDX(la), PTX(la), and PGOFF(la),
-// // use PGADDR(PDX(la), PTX(la), PGOFF(la)).
-// 
-// // page directory index
-// #define PDX(la) ((((uintptr_t)(la)) >> PDXSHIFT) & 0x3FF)
-// 
-// // page table index
-// #define PTX(la) ((((uintptr_t)(la)) >> PTXSHIFT) & 0x3FF)
-// 
-// // page number field of address
-// #define PPN(la) (((uintptr_t)(la)) >> PTXSHIFT)
-// 
-// // offset in page
-// #define PGOFF(la) (((uintptr_t)(la)) & 0xFFF)
-// 
-// // construct linear address from indexes and offset
-// #define PGADDR(d, t, o) ((uintptr_t)((d) << PDXSHIFT | (t) << PTXSHIFT | (o)))
-// 
-// // address in page table or page directory entry
-// #define PTE_ADDR(pte)   ((uintptr_t)(pte) & ~0xFFF)
-// #define PDE_ADDR(pde)   PTE_ADDR(pde)
-// 
-// /* page directory and page table constants */
-// #define NPDEENTRY       1024                    // page directory entries per page directory
-// #define NPTEENTRY       1024                    // page table entries per page table
-// 
-// #define PGSIZE          4096                    // bytes mapped by a page
-// #define PGSHIFT         12                      // log2(PGSIZE)
-// #define PTSIZE          (PGSIZE * NPTEENTRY)    // bytes mapped by a page directory entry
-// #define PTSHIFT         22                      // log2(PTSIZE)
-// 
-// #define PTXSHIFT        12                      // offset of PTX in a linear address
-// #define PDXSHIFT        22                      // offset of PDX in a linear address
-// 
-// /* page table/directory entry flags */
-// #define PTE_P           0x001                   // Present
-// #define PTE_W           0x002                   // Writeable
-// #define PTE_U           0x004                   // User
-// #define PTE_PWT         0x008                   // Write-Through
-// #define PTE_PCD         0x010                   // Cache-Disable
-// #define PTE_A           0x020                   // Accessed
-// #define PTE_D           0x040                   // Dirty
-// #define PTE_PS          0x080                   // Page Size
-// #define PTE_MBZ         0x180                   // Bits must be zero
-// #define PTE_AVAIL       0xE00                   // Available for software use
-//                                                 // The PTE_AVAIL bits aren't used by the kernel or interpreted by the
-//                                                 // hardware, so user processes are allowed to set them arbitrarily.
-// 
-// #define PTE_USER        (PTE_U | PTE_W | PTE_P)
-// 
-// /* Control Register flags */
-// #define CR0_PE          0x00000001              // Protection Enable
-// #define CR0_MP          0x00000002              // Monitor coProcessor
-// #define CR0_EM          0x00000004              // Emulation
-// #define CR0_TS          0x00000008              // Task Switched
-// #define CR0_ET          0x00000010              // Extension Type
-// #define CR0_NE          0x00000020              // Numeric Errror
-// #define CR0_WP          0x00010000              // Write Protect
-// #define CR0_AM          0x00040000              // Alignment Mask
-// #define CR0_NW          0x20000000              // Not Writethrough
-// #define CR0_CD          0x40000000              // Cache Disable
-// #define CR0_PG          0x80000000              // Paging
-// 
-// #define CR4_PCE         0x00000100              // Performance counter enable
-// #define CR4_MCE         0x00000040              // Machine Check Enable
-// #define CR4_PSE         0x00000010              // Page Size Extensions
-// #define CR4_DE          0x00000008              // Debugging Extensions
-// #define CR4_TSD         0x00000004              // Time Stamp Disable
-// #define CR4_PVI         0x00000002              // Protected-Mode Virtual Interrupts
-// #define CR4_VME         0x00000001              // V86 Mode Extensions
+/**
+ * Virtual page table. Entry PDX[VPT] in the PD (Page Directory) contains
+ * a pointer to the page directory itself, thereby turning the PD into a page
+ * table, which maps all the PTEs (Page Table Entry) containing the page mappings
+ * for the entire virtual address space into that 4 Meg region starting at VPT.
+ **/
+#define KERNEL_VPT                 0xFAC00000
+
+/* HERE GOES THE -- PAGE!!! */
+
+#ifndef __ASSEMBLER__
+
+    #include "pub/atomic.h"
+
+    typedef uintptr_t pte_t;
+    typedef uintptr_t pde_t;
+    typedef size_t page_number_t;
+
+    // some constants for bios interrupt 15h AX = 0xE820
+    #define E820_MAXENT         20      // number of entries in E820MAP
+    #define E820_ARM            1       // address range memory
+    #define E820_ARR            2       // address range reserved
+
+    typedef struct {
+        int nmap;
+        struct {
+            uint64_t addr;
+            uint64_t size;
+            uint32_t type;
+        } C0RE_PACKED map[E820_MAXENT];
+    } e820map_t;
+
+    /**
+     * struct Page - Page descriptor structures. Each Page describes one
+     * physical page. In kern/mm/pmm.h, you can find lots of useful functions
+     * that convert Page to other data types, such as phyical address.
+     **/
+    typedef struct page_t_tag {
+        int ref;                        // page frame's reference counter
+        uint32_t flags;                 // array of flags that describe the status of the page frame
+        
+        // used for allocator
+        unsigned int nfree;             // number of free pages(or the real size of the page block)
+        struct page_t_tag *prev;
+        struct page_t_tag *next;
+    } page_t;
+
+    /* flags describing the status of a page frame */
+    #define PAGE_FLAG_RESV              0 // the page is reserved for kernel and cannot be allocated
+    #define PAGE_FLAG_FREE              1 // the page is freed
+
+    #define page_setReserved(p)         btsl(PAGE_FLAG_RESV, &(p)->flags)
+    #define page_resetReserved(p)       btrl(PAGE_FLAG_RESV, &(p)->flags)
+    #define page_isReserved(p)          btl(PAGE_FLAG_RESV, &(p)->flags)
+
+    #define page_setFree(p)             btsl(PAGE_FLAG_FREE, &(p)->flags)
+    #define page_resetFree(p)           btrl(PAGE_FLAG_FREE, &(p)->flags)
+    #define page_isFree(p)              btl(PAGE_FLAG_FREE, &(p)->flags)
+
+    #define page_clearFlags(p)          ((p)->flags = 0)
+
+    #define page_clearRef(p)            ((p)->ref = 0)
+    #define page_incRef(p)              ((p)->ref++)
+    #define page_decRef(p)              ((p)->ref--)
+
+    // a linear address 'la' has a three-part structure as follows:
+    //
+    // +--------10------+-------10-------+---------12---------+
+    // | Page Directory |   Page Table   | Offset within Page |
+    // |      Index     |     Index      |                    |
+    // +----------------+----------------+--------------------+
+    //  \--- PDX(la) --/ \--- PTX(la) --/ \---- POFF(la) ----/
+    //  \----------- PPN(la) -----------/
+    //
+    
+    // page directory index
+    #define PD_INDEX(la) ((((uintptr_t)(la)) >> PD_INDEX_SHIFT) & 0x3ff)
+    
+    // page table index
+    #define PT_INDEX(la) ((((uintptr_t)(la)) >> PT_INDEX_SHIFT) & 0x3ff)
+    
+    // page number field of address
+    #define PAGE_NUMBER(la) (((uintptr_t)(la)) >> PT_INDEX_SHIFT)
+    
+    // offset in page
+    #define PAGE_OFS(la) (((uintptr_t)(la)) & 0xfff)
+    
+    // construct linear address from indexes and offset
+    #define PAGE_ADDR(d, t, o) (((uintptr_t)(d) << PD_INDEX_SHIFT | (uintptr_t)(t) << PT_INDEX_SHIFT | (uintptr_t)(o)))
+    
+    // address in page table or page directory entry
+    #define PTE_ADDR(pte)   ((uintptr_t)(pte) & ~0xfff)
+    #define PDE_ADDR(pde)   PTE_ADDR(pde)
+    
+    /* page directory and page table constants */
+    #define PD_NENTRY       1024                    // page directory entries per page directory
+    #define PT_NENTRY       1024                    // page table entries per page table
+    
+    #define PAGE_SIZE       4096                    // bytes mapped by a page
+    #define PAGE_SHIFT      12                      // log2(PAGE_SIZE)
+    #define PT_SIZE         (PAGE_SIZE * PT_NENTRY) // bytes mapped by a page directory entry
+    #define PT_SHIFT        22                      // log2(PT_SIZE)
+    
+    #define PT_INDEX_SHIFT  12                      // offset of PT_INDEX_SHIFT in a linear address
+    #define PD_INDEX_SHIFT  22                      // offset of PD_INDEX_SHIFT in a linear address
+    
+    /* page table/directory entry flags */
+    #define PTE_FLAG_P      0x001                   // present
+    #define PTE_FLAG_W      0x002                   // writeable
+    #define PTE_FLAG_U      0x004                   // user
+    #define PTE_FLAG_PWT    0x008                   // write-Through
+    #define PTE_FLAG_PCD    0x010                   // cache-Disable
+    #define PTE_FLAG_A      0x020                   // accessed
+    #define PTE_FLAG_D      0x040                   // dirty
+    #define PTE_FLAG_PS     0x080                   // page Size
+    #define PTE_FLAG_MBZ    0x180                   // bits must be zero
+    #define PTE_FLAG_AVAIL  0xe00                   // available for software use
+                                                    // the PTE_AVAIL bits aren't used by the kernel or interpreted by the
+                                                    // hardware, so user processes are allowed to set them arbitrarily.
+    
+    #define PTE_FLAG_USER   (PTE_FLAG_U | PTE_FLAG_W | PTE_FLAG_P)
+    
+    /* Control Register flags */
+    #define CR0_PE          0x00000001              // protection enable
+    #define CR0_MP          0x00000002              // monitor co-processor
+    #define CR0_EM          0x00000004              // emulation
+    #define CR0_TS          0x00000008              // task switched
+    #define CR0_ET          0x00000010              // extension type
+    #define CR0_NE          0x00000020              // numeric errror
+    #define CR0_WP          0x00010000              // write protect
+    #define CR0_AM          0x00040000              // alignment mask
+    #define CR0_NW          0x20000000              // not writethrough
+    #define CR0_CD          0x40000000              // cache disable
+    #define CR0_PG          0x80000000              // paging
+    
+    #define CR4_PCE         0x00000100              // performance counter enable
+    #define CR4_MCE         0x00000040              // machine check enable
+    #define CR4_PSE         0x00000010              // page size extensions
+    #define CR4_DE          0x00000008              // debugging extensions
+    #define CR4_TSD         0x00000004              // time stamp disable
+    #define CR4_PVI         0x00000002              // protected-mode virtual interrupts
+    #define CR4_VME         0x00000001              // v86 mode extensions
+    
+#endif // __ASSEMBLER__
 
 #endif

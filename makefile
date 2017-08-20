@@ -6,12 +6,13 @@ export CC := gcc
 export OBJCOPY := objcopy
 export TERMINAL := gnome-terminal
 export QEMU := qemu-system-i386
+export BOCHS := bochs
 
 export INCLUDES := $(BASE)
 export CFLAGS := -Wall -c -g -ggdb -m32 -I$(INCLUDES) -fno-builtin -fno-stack-protector -Os -nostdinc
 export LDFLAGS := -nostdlib -m $(shell $(LD) -V | grep elf_i386 2>/dev/null)
 
-export QEMUOPTS := -m 4096
+export QEMUOPTS := -m 512
 
 export OUTPUT := $(BASE)/bin
 
@@ -42,13 +43,18 @@ tool: output
 	cd tool; make
 
 debug: img
-	$(QEMU) -S -s -parallel stdio -hda $(FINAL) -serial null $(QEMUOPTS) &
+	$(QEMU) -S -s -parallel stdio -drive format=raw,file=$(FINAL) -serial null $(QEMUOPTS) &
 	sleep 2
 	$(TERMINAL) -e "gdb -q -tui -x tool/gdbinit"
 
 run: img
-	$(QEMU) -hda $(FINAL) $(QEMUOPTS)
+	$(QEMU) -drive format=raw,file=$(FINAL) $(QEMUOPTS) -parallel stdio
 
+bochs: img
+	$(BOCHS) -qf tool/bochs.bxrc &
+	sleep 2
+	$(TERMINAL) -e "gdb -q -tui -x tool/gdbinit"
+	
 clean: NOSKIP
 	cd pub; make clean
 	cd kernel; make clean

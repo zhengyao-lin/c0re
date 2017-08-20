@@ -21,9 +21,9 @@ relocated:
 
     # set ebp, esp
     movl $0x0, %ebp
-    # the kernel stack region is from bootstack -- bootstacktop,
+    # the kernel stack region is from kernel_stack -- kernel_stacktop,
     # the kernel stack size is KSTACKSIZE (8KB)defined in memlayout.h
-    movl $bootstacktop, %esp
+    movl $kernel_stacktop, %esp
     
     # now kernel stack is ready , call the first C function
     call c0re_init
@@ -35,12 +35,12 @@ relocated:
 
 .align KERNEL_PGSIZE
 
-.globl bootstack
-bootstack:
+.globl kernel_stack
+kernel_stack:
     .space KERNEL_STACKSIZE
     
-.globl bootstacktop
-bootstacktop:
+.globl kernel_stacktop
+kernel_stacktop:
 
 .align 4
 gdt:

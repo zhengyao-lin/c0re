@@ -53,4 +53,20 @@ lab1 -> lab2
           （好像小于4G还是多少就会崩溃）
         3. 然后console和一些驱动里面地址都有改过（因为内核加载地址改了）
 
+    @20082017
+        potential bugs(search TODO):
+        1. ffit.c
+        2. x86.h
+        3. line 34 pmm.c (typo)
+        4. line 394 in pmm.c(in labcodes_answer), it should be PTE_ADDR?
+        5. the memset at the begining of kern_init may clear the allocator?
+        
+        终于调完分页的东西了。。主要页分配器要注意测试。。一个超蠢的bug调了一个下午
+        主要基于页的地址转换比较绕，特别是马上要打开分页那一小段要仔细考虑才能让代码正常运行
+        查了半天段页式的内存管理觉得好难后来发现ucore也没有真正利用分段（只是一开始简单换算一下，最后直接映射了）。不知道后面会不会改。
+        
+        主要还是有些地方有些小问题。。比如为什么要把0xC0000000当内核基址。。
+        
+        然后键盘中断稍微有点诡异输入都是乱码。。没时间调了明天看
+
 lab2

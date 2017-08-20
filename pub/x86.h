@@ -36,6 +36,20 @@ C0RE_INLINE void sti(void);
 C0RE_INLINE void cli(void);
 C0RE_INLINE void ltr(uint16_t sel);
 
+C0RE_INLINE uint32_t read_eflags(); 
+C0RE_INLINE void write_eflags(uint32_t eflags); 
+C0RE_INLINE void lcr0(uintptr_t cr0); 
+C0RE_INLINE void lcr3(uintptr_t cr3); 
+C0RE_INLINE uintptr_t rcr0(); 
+C0RE_INLINE uintptr_t rcr1(); 
+C0RE_INLINE uintptr_t rcr2(); 
+C0RE_INLINE uintptr_t rcr3(); 
+C0RE_INLINE void invlpg(void *addr); 
+
+C0RE_INLINE void breakpoint(void);
+C0RE_INLINE uint32_t read_dr(unsigned regnum);
+C0RE_INLINE void write_dr(unsigned regnum, uint32_t value);
+
 C0RE_INLINE void hlt();
 
 /* INPUT byte */
@@ -105,6 +119,106 @@ C0RE_INLINE
 void ltr(uint16_t sel)
 {
     asm volatile ("ltr %0" :: "r" (sel));
+}
+
+C0RE_INLINE
+void breakpoint()
+{
+    asm volatile ("int $3");
+}
+
+C0RE_INLINE
+uint32_t read_dr(unsigned regnum)
+{
+    uint32_t value = 0;
+    
+    switch (regnum) {
+        case 0: asm volatile ("movl %%db0, %0" : "=r" (value)); break;
+        case 1: asm volatile ("movl %%db1, %0" : "=r" (value)); break;
+        case 2: asm volatile ("movl %%db2, %0" : "=r" (value)); break;
+        case 3: asm volatile ("movl %%db3, %0" : "=r" (value)); break;
+        case 6: asm volatile ("movl %%db6, %0" : "=r" (value)); break;
+        case 7: asm volatile ("movl %%db7, %0" : "=r" (value)); break;
+    }
+    
+    return value;
+}
+
+C0RE_INLINE
+void write_dr(unsigned regnum, uint32_t value)
+{
+    switch (regnum) {
+        case 0: asm volatile ("movl %0, %%db0" :: "r" (value)); break;
+        case 1: asm volatile ("movl %0, %%db1" :: "r" (value)); break;
+        case 2: asm volatile ("movl %0, %%db2" :: "r" (value)); break;
+        case 3: asm volatile ("movl %0, %%db3" :: "r" (value)); break;
+        case 6: asm volatile ("movl %0, %%db6" :: "r" (value)); break;
+        case 7: asm volatile ("movl %0, %%db7" :: "r" (value)); break;
+    }
+}
+
+C0RE_INLINE
+uint32_t read_eflags()
+{
+    uint32_t eflags;
+    asm volatile ("pushfl; popl %0" : "=r" (eflags));
+    return eflags;
+}
+
+C0RE_INLINE
+void write_eflags(uint32_t eflags)
+{
+    asm volatile ("pushl %0; popfl" :: "r" (eflags));
+}
+
+C0RE_INLINE
+void lcr0(uintptr_t cr0)
+{
+    asm volatile ("mov %0, %%cr0" :: "r" (cr0) : "memory");
+}
+
+C0RE_INLINE
+void lcr3(uintptr_t cr3)
+{
+    asm volatile ("mov %0, %%cr3" :: "r" (cr3) : "memory");
+}
+
+C0RE_INLINE
+uintptr_t rcr0()
+{
+    uintptr_t cr0;
+    asm volatile ("mov %%cr0, %0" : "=r" (cr0) :: "memory");
+    return cr0;
+}
+
+C0RE_INLINE
+uintptr_t rcr1()
+{
+    uintptr_t cr1;
+    asm volatile ("mov %%cr1, %0" : "=r" (cr1) :: "memory");
+    return cr1;
+}
+
+C0RE_INLINE
+uintptr_t rcr2()
+{
+    uintptr_t cr2;
+    asm volatile ("mov %%cr2, %0" : "=r" (cr2) :: "memory");
+    return cr2;
+}
+
+C0RE_INLINE
+uintptr_t rcr3()
+{
+    uintptr_t cr3;
+    asm volatile ("mov %%cr3, %0" : "=r" (cr3) :: "memory");
+    return cr3;
+}
+
+C0RE_INLINE
+void invlpg(void *addr)
+{
+    asm volatile ("invlpg (%0)" :: "r" (addr) : "memory");
 }
 
 C0RE_INLINE

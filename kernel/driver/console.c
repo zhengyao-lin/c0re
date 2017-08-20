@@ -4,11 +4,14 @@
 
 #include "lib/io.h"
 #include "lib/debug.h"
+#include "lib/sync.h"
+
 #include "intr/trap.h"
 #include "driver/pic.h"
 #include "driver/kbdreg.h"
 
 #include "mem/mmu.h"
+#include "mem/pmm.h"
 
 /* stupid I/O delay routine necessitated by historical PC design flaws */
 C0RE_INLINE
@@ -55,45 +58,45 @@ static uint16_t *crt_buf;
 static uint16_t crt_pos;
 static uint16_t addr_6845;
 
-// 显示器初始化，CGA 是 Color Graphics Adapter 的缩写
-// CGA显存按照下面的方式映射：
-//   -- 0xB0000 - 0xB7777 单色字符模式
-//   -- 0xB8000 - 0xBFFFF 彩色字符模式及 CGA 兼容图形模式
-// 6845芯片是IBM PC中的视频控制器
-// CPU通过IO地址0x3B4-0x3B5来驱动6845控制单色显示，通过IO地址0x3D4-0x3D5来控制彩色显示。
-//    -- 数据寄存器 映射 到 端口 0x3D5或0x3B5 
-//    -- 索引寄存器 0x3D4或0x3B4,决定在数据寄存器中的数据表示什么。
+// CGA = Color Graphics Adaptor
+// CGA video memory mapping:
+//   -- 0xB0000 - 0xB7777 monocolor text mode
+//   -- 0xB8000 - 0xBFFFF multicolor text mode
+// 
+// 6845 chip is the video controller in IBM PC
+// 6845 is controlled using IO port 0x3B4-0x3B5 for monocolor and 0x3D4-0x3D5 for multicolor
+//   -- 0x3D5, 0x3B5: data register
+//   -- 0x3D4, 0x3B4: index register(type of data in 0x3D5 and 0x3B5)
 
 /* TEXT-mode CGA/VGA display output */
 static void cga_init(void)
 {
-    volatile uint16_t *cp = (uint16_t *)(CGA_BUF + KERNEL_BASE);
-                                                   //CGA_BUF: 0xB8000 (彩色显示的显存物理基址)
-    uint16_t was = *cp;                            //保存当前显存0xB8000处的值
+    volatile uint16_t *cp = (uint16_t *)KADDR(CGA_BUF);
+                                                   // CGA_BUF: 0xB8000 (base address for multicolor video memory)
+                                                   // use KADDR to reach the real physical address
+    uint16_t was = *cp;                            // same the current value
     
-    *cp = (uint16_t) 0xA55A;                       // 给这个地址随便写个值，看看能否再读出同样的值
+    *cp = (uint16_t) 0xA55A;                       // write an arbitrary value
     
-    if (*cp != 0xA55A) {                           // 如果读不出来，说明没有这块显存，即是单显配置
-        cp = (uint16_t*)(MONO_BUF + KERNEL_BASE);  // 设置为单显的显存基址 MONO_BUF： 0xB0000
-        addr_6845 = MONO_BASE;                     // 设置为单显控制的IO地址，MONO_BASE: 0x3B4
-    } else {                                       // 如果读出来了，有这块显存，即是彩显配置
-        *cp = was;                                 //还原原来显存位置的值
-        addr_6845 = CGA_BASE;                      // 设置为彩显控制的IO地址，CGA_BASE: 0x3D4 
+    if (*cp != 0xA55A) {                           // unable to get the same value
+        cp = (uint16_t*)KADDR(MONO_BUF);           // monocolor
+        addr_6845 = MONO_BASE;                     // MONO_BASE: 0x3B4
+    } else {                                       // multicolor
+        *cp = was;                                 // restore
+        addr_6845 = CGA_BASE;                      // CGA_BASE: 0x3D4 
     }
 
-    // Extract cursor location
-    // 6845索引寄存器的index 0x0E（及十进制的14）== 光标位置(高位)
-    // 6845索引寄存器的index 0x0F（及十进制的15）== 光标位置(低位)
-    // 6845 reg 15 : Cursor Address (Low Byte)
+    // 6845 index reg: 0eh -> read cursor(high byte)
+    // 6845 index reg: 0fh -> read cursor(low byte)    
     uint32_t pos;
     
     outb(addr_6845, 14);                                        
-    pos = inb(addr_6845 + 1) << 8;                 //读出了光标位置(高位)
+    pos = inb(addr_6845 + 1) << 8;                 // high byte
     outb(addr_6845, 15);
-    pos |= inb(addr_6845 + 1);                     //读出了光标位置(低位)
+    pos |= inb(addr_6845 + 1);                     // low byte
 
-    crt_buf = (uint16_t*) cp;                      // crt_buf 是CGA显存起始地址
-    crt_pos = pos;                                 // crt_pos 是CGA当前光标位置
+    crt_buf = (uint16_t*) cp;                      // start address of video memory
+    crt_pos = pos;                                 // curosr position
 }
 
 static bool serial_exists = 0;
@@ -226,11 +229,11 @@ static void serial_putc(int c)
     }
 }
 
-/* *
+/**
  * Here we manage the console input buffer, where we stash characters
  * received from the keyboard or serial port whenever the corresponding
  * interrupt occurs.
- * */
+ **/
 
 #define CONSBUFSIZE 512
 
@@ -240,10 +243,10 @@ static struct {
     uint32_t wpos; // write position
 } cons;
 
-/* *
+/**
  * cons_intr - called by device interrupt routines to feed input
  * characters into the circular console input buffer.
- * */
+ **/
 static void cons_intr(int (*proc)())
 {
     int c;
@@ -381,12 +384,12 @@ static uint8_t *charcode[4] = {
     ctrlmap
 };
 
-/* *
+/**
  * kbd_proc_data - get data from keyboard
  *
  * The kbd_proc_data() function gets data from the keyboard.
  * If we finish a character, return it, else 0. And return -1 if no data.
- * */
+ **/
 static int kbd_proc_data()
 {
     int c;
@@ -465,35 +468,37 @@ void cons_init()
 /* cons_putc - print a single character @c to console devices */
 void cons_putc(int c)
 {
-    lpt_putc(c);
-    cga_putc(c);
-    serial_putc(c);
+    no_intr_block({
+        lpt_putc(c);
+        cga_putc(c);
+        serial_putc(c);
+    });
 }
 
-/* *
+/**
  * cons_getc - return the next input character from console,
  * or 0 if none waiting.
- * */
+ **/
 int cons_getc()
 {
-    int c;
+    int c = 0;
 
-    // poll for any pending input characters,
-    // so that this function works even when interrupts are disabled
-    // (e.g., when called from the kernel monitor).
-    serial_intr();
-    kbd_intr();
+    no_intr_block({
+        // poll for any pending input characters,
+        // so that this function works even when interrupts are disabled
+        // (e.g., when called from the kernel monitor).
+        serial_intr();
+        kbd_intr();
 
-    // dequeue the next character from the input buffer.
-    if (cons.rpos != cons.wpos) {
-        c = cons.buf[cons.rpos++];
-        
-        if (cons.rpos == CONSBUFSIZE) {
-            cons.rpos = 0;
+        // dequeue the next character from the input buffer.
+        if (cons.rpos != cons.wpos) {
+            c = cons.buf[cons.rpos++];
+            
+            if (cons.rpos == CONSBUFSIZE) {
+                cons.rpos = 0;
+            }
         }
-        
-        return c;
-    }
+    });
     
-    return 0;
+    return c;
 }
