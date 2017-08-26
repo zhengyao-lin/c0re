@@ -23,6 +23,7 @@ C0RE_INLINE uint8_t inb(uint16_t port);
 C0RE_INLINE void insl(uint32_t port, void *addr, int cnt);
 C0RE_INLINE void outb(uint16_t port, uint8_t data);
 C0RE_INLINE void outw(uint16_t port, uint16_t data);
+C0RE_INLINE void outsl(uint32_t port, const void *addr, int cnt);
 C0RE_INLINE uint32_t read_ebp(void);
 
 /* argument used for LGDT, LLDT(not used) and LIDT instructions. */
@@ -86,6 +87,18 @@ C0RE_INLINE
 void outw(uint16_t port, uint16_t data)
 {
     asm volatile ("outw %0, %1" :: "a" (data), "d" (port));
+}
+
+C0RE_INLINE
+void outsl(uint32_t port, const void *addr, int cnt)
+{
+    asm volatile (
+        "cld;"
+        "repne; outsl;"
+        : "=S" (addr), "=c" (cnt)
+        : "d" (port), "0" (addr), "1" (cnt)
+        : "memory", "cc"
+    );
 }
 
 C0RE_INLINE

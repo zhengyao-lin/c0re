@@ -2,6 +2,11 @@
 
 export BASE := $(PWD)
 
+export OUTPUT := $(BASE)/bin
+
+SWAPIMG := $(OUTPUT)/swap.img
+FINAL := $(OUTPUT)/c0re.img
+
 export CC := gcc
 export OBJCOPY := objcopy
 export TERMINAL := gnome-terminal
@@ -12,11 +17,7 @@ export INCLUDES := $(BASE)
 export CFLAGS := -Wall -c -g -ggdb -m32 -I$(INCLUDES) -fno-builtin -fno-stack-protector -Os -nostdinc
 export LDFLAGS := -nostdlib -m $(shell $(LD) -V | grep elf_i386 2>/dev/null)
 
-export QEMUOPTS := -m 512
-
-export OUTPUT := $(BASE)/bin
-
-FINAL := $(OUTPUT)/c0re.img
+export QEMUOPTS := -m 512 -drive file=$(SWAPIMG),media=disk,cache=writeback
 
 MAIN: tool img
 
@@ -39,6 +40,8 @@ img: output tool pub kernel boot
 	dd if=$(OUTPUT)/boot.img of=$(FINAL) conv=notrunc
 	dd if=$(OUTPUT)/kernel.elf of=$(FINAL) seek=1 conv=notrunc
 	
+	dd if=/dev/zero of=$(SWAPIMG) bs=1M count=16
+	
 tool: output
 	cd tool; make
 
@@ -51,7 +54,12 @@ run: img
 	$(QEMU) -drive format=raw,file=$(FINAL) $(QEMUOPTS) -parallel stdio
 
 bochs: img
-	$(BOCHS) -qf tool/bochs.bxrc &
+	rm -f $(OUTPUT)/*.lock
+	$(BOCHS) -qf tool/bochs.bxrc
+	
+bochs-debug: img
+	rm -f $(OUTPUT)/*.lock
+	$(BOCHS) -qf tool/bochs-debug.bxrc &
 	sleep 2
 	$(TERMINAL) -e "gdb -q -tui -x tool/gdbinit"
 	

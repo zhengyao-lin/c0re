@@ -1,12 +1,15 @@
 #include "pub/com.h"
 #include "pub/x86.h"
 #include "pub/string.h"
+#include "pub/error.h"
 
 #include "lib/sync.h"
 #include "lib/debug.h"
 
 #include "mem/mmu.h"
 #include "mem/pmm.h"
+#include "mem/vmm.h"
+#include "mem/swap.h"
 #include "mem/ffit.h"
 
 /* *
@@ -121,25 +124,44 @@ static void addMem(page_t *base, size_t n)
     page_alloc->addMem(base, n);
 }
 
-static page_t *palloc(size_t n)
+page_t *palloc(size_t n)
 {
     page_t *ret;
-    no_intr_block(ret = page_alloc->alloc(n));
+    size_t retry = 0;
+    
+    while (retry < SWAP_MAX_RETRY_TIME) {
+        no_intr_block(ret = page_alloc->alloc(n));
+    
+        // successful allocation OR
+        // too big block OR
+        // no swap space
+        if (ret || n > 1 || !swap_hasInit()) break;
+    
+        extern vma_set_t *c0re_check_vma_set;
+        trace("swap: out of memory, try to swap out %d pages", n);
+        swap_out(c0re_check_vma_set, n, 0);
+    
+        retry++;
+    }
+    
+    if (retry == SWAP_MAX_RETRY_TIME) {
+        trace("swap: max retry time reached. unable to swap out enough pages");
+    }
+    
     return ret;
 }
 
-// static void pfree(page_t *base)
-// {
-//     no_intr_block(page_alloc->free(base));
-// }
+void pfree(page_t *base)
+{
+    no_intr_block(page_alloc->free(base));
+}
 
-
-// static size_t nfree()
-// {
-//     size_t ret;
-//     no_intr_block(ret = page_alloc->nfree());
-//     return ret;
-// }
+size_t nfpage()
+{
+    size_t ret;
+    no_intr_block(ret = page_alloc->nfree());
+    return ret;
+}
 
 static void page_init()
 {
@@ -200,18 +222,6 @@ static void page_init()
             }
         }
     }
-}
-
-C0RE_INLINE
-page_t *palloc_s(size_t n)
-{
-    page_t *npg = palloc(n);
-    
-    if (!npg) {
-        panic("unable to alloc page");
-    }
-    
-    return npg;
 }
 
 // get_pte - get pte and return the kernel virtual address of this pte for la
@@ -305,7 +315,7 @@ uintptr_t c0re_pgdir_pa;
 
 //get_pgtable_items - In [left, right] range of PDT or PT, find a continuous linear addr space
 //                  - (left_store*X_SIZE~right_store*X_SIZE) for PDT or PT
-//                  - X_SIZE=PTSIZE=4M, if PDT; X_SIZE=PGSIZE=4K, if PT
+//                  - X_SIZE=PTSIZE=4M, if PDT; X_SIZE=PAGE_SIZE=4K, if PT
 // paramemters:
 //  left:        the low side of table's range
 //  right:       the high side of table's range
@@ -397,6 +407,10 @@ void print_pgdir()
     kprintf("--------------------- END ---------------------\n");
 }
 
+static void check_palloc();
+static void check_pgdir();
+static void check_c0re_pgdir();
+
 /* pmm_init - initialize the physical memory management */
 void pmm_init()
 {
@@ -404,9 +418,13 @@ void pmm_init()
     page_allocator_init();
     page_init();
     
+    check_palloc();
+    
     c0re_pgdir = page2kva(palloc_s(1));
     c0re_pgdir_pa = PADDR(c0re_pgdir);
     memset(c0re_pgdir, 0, PAGE_SIZE);
+    
+    check_pgdir();
     
     // TODO: check alignment??
     assert(KERNEL_BASE % PT_SIZE == 0 && KERNEL_TOP % PT_SIZE == 0);
@@ -442,5 +460,231 @@ void pmm_init()
     // restore the page directory
     c0re_pgdir[0] = 0;
 
+    check_c0re_pgdir();
     print_pgdir();
+}
+
+void *kmalloc(size_t n)
+{
+    assert(n > 0 && n < 1024 * 1024);
+    int npage = (n + PAGE_SIZE - 1) / PAGE_SIZE;
+    return page2kva(palloc_s(npage));
+}
+
+void kfree(void *ptr, size_t n)
+{
+    // assert(n > 0 && n < 1024 * 1024);
+    assert(ptr);
+    pfree(kva2page(ptr));
+}
+
+// get_page - get related Page struct for linear address la using PDT pgdir
+page_t *get_page(pde_t *pgdir, uintptr_t la, pte_t **ptep_result)
+{
+    pte_t *ptep = get_pte(pgdir, la, 0);
+    
+    if (ptep_result) {
+        *ptep_result = ptep;
+    }
+    
+    if (ptep != NULL && *ptep & PTE_FLAG_P) {
+        return pte2page(*ptep);
+    }
+    
+    return NULL;
+}
+
+//page_remove_pte - free an page_t which is related to by linear address la
+//                - and clean(invalidate) pte which is related linear address la
+//note: PT is changed, so the TLB need to be invalidate 
+C0RE_INLINE
+void page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep)
+{
+    if (*ptep & PTE_FLAG_P) {
+        page_t *page = pte2page(*ptep);
+        
+        if (page_decRef(page) == 0) {
+            pfree(page);
+        }
+        
+        *ptep = 0;
+        tlb_invalidate(pgdir, la);
+    }
+}
+
+//page_remove - free an Page which is related to by linear address la and has an validated pte
+void page_remove(pde_t *pgdir, uintptr_t la)
+{
+    pte_t *ptep = get_pte(pgdir, la, 0);
+    
+    if (ptep) {
+        page_remove_pte(pgdir, la, ptep);
+    }
+}
+
+// page_insert - build the map of phy addr of an Page with the linear addr la
+// paramemters:
+//  pgdir: the kernel virtual base address of PDT
+//  page:  the Page which need to map
+//  la:    the linear address need to map
+//  perm:  the permission of this Page which is setted in related pte
+// return value: always 0
+// note: PT is changed, so the TLB need to be invalidate 
+int page_insert(pde_t *pgdir, page_t *page, uintptr_t la, uint32_t perm)
+{
+    pte_t *ptep = get_pte(pgdir, la, 1);
+    
+    if (!ptep) {
+        // no memory
+        return -E_NO_MEM;
+    }
+    
+    page_incRef(page);
+    
+    if (*ptep & PTE_FLAG_P) {
+        page_t *p = pte2page(*ptep);
+        
+        if (p == page) {
+            page_decRef(page);
+        } else {
+            page_remove_pte(pgdir, la, ptep);
+        }
+    }
+    
+    *ptep = page2pa(page) | PTE_FLAG_P | perm;
+    tlb_invalidate(pgdir, la);
+    
+    return 0;
+}
+
+// pgdir_alloc_page - call alloc_page & page_insert functions to 
+//                  - allocate a page size memory & setup an addr map
+//                  - pa<->la with linear address la and the PDT pgdir
+page_t *pgdir_palloc(pde_t *pgdir, uintptr_t la, uint32_t perm)
+{
+    extern vma_set_t *c0re_check_vma_set;
+    page_t *page = palloc(1);
+    
+    if (page) {
+        if (page_insert(pgdir, page, la, perm)) {
+            // error
+            pfree(page);
+            return NULL;
+        }
+        
+        if (swap_hasInit()) {
+            // used for check
+            if (c0re_check_vma_set) {
+                swap_mapSwappable(c0re_check_vma_set, la, page, 0);
+                
+                page->pra_vaddr = la;
+                
+                assert(page_getRef(page) == 1);
+                //cprintf("get No. %d  page: pra_vaddr %x, pra_link.prev %x, pra_link_next %x in pgdir_alloc_page\n", (page-pages), page->pra_vaddr,page->pra_page_link.prev, page->pra_page_link.next);
+            }
+        }
+    }
+
+    return page;
+}
+
+// invalidate a TLB entry, but only if the page tables being
+// edited are the ones currently in use by the processor
+// TODO: wtf is this???
+void tlb_invalidate(pde_t *pgdir, uintptr_t la)
+{
+    if (rcr3() == PADDR(pgdir)) {
+        invlpg((void *)la);
+    }
+}
+
+static void check_palloc()
+{
+    page_alloc->check();
+    trace("check success: page alloc");
+}
+
+static void check_pgdir()
+{
+    assert(c0re_npage <= KERNEL_MEMSIZE / PAGE_SIZE);
+    
+    assert(c0re_pgdir != NULL && (uint32_t)PAGE_OFS(c0re_pgdir) == 0);
+    assert(get_page(c0re_pgdir, 0x0, NULL) == NULL);
+
+    page_t *p1, *p2;
+    p1 = palloc(1);
+    assert(page_insert(c0re_pgdir, p1, 0x0, 0) == 0);
+
+    pte_t *ptep;
+    assert((ptep = get_pte(c0re_pgdir, 0x0, 0)) != NULL);
+    assert(pte2page(*ptep) == p1);
+    assert(page_getRef(p1) == 1);
+
+    ptep = &((pte_t *)KADDR(PDE_ADDR(c0re_pgdir[0])))[1];
+    assert(get_pte(c0re_pgdir, PAGE_SIZE, 0) == ptep);
+
+    p2 = palloc(1);
+    assert(page_insert(c0re_pgdir, p2, PAGE_SIZE, PTE_FLAG_U | PTE_FLAG_W) == 0);
+    assert((ptep = get_pte(c0re_pgdir, PAGE_SIZE, 0)) != NULL);
+    assert(*ptep & PTE_FLAG_U);
+    assert(*ptep & PTE_FLAG_W);
+    assert(c0re_pgdir[0] & PTE_FLAG_U);
+    assert(page_getRef(p2) == 1);
+
+    assert(page_insert(c0re_pgdir, p1, PAGE_SIZE, 0) == 0);
+    assert(page_getRef(p1) == 2);
+    assert(page_getRef(p2) == 0);
+    assert((ptep = get_pte(c0re_pgdir, PAGE_SIZE, 0)) != NULL);
+    assert(pte2page(*ptep) == p1);
+    assert((*ptep & PTE_FLAG_U) == 0);
+
+    page_remove(c0re_pgdir, 0x0);
+    assert(page_getRef(p1) == 1);
+    assert(page_getRef(p2) == 0);
+
+    page_remove(c0re_pgdir, PAGE_SIZE);
+    assert(page_getRef(p1) == 0);
+    assert(page_getRef(p2) == 0);
+
+    assert(page_getRef(pde2page(c0re_pgdir[0])) == 1);
+    pfree(pde2page(c0re_pgdir[0]));
+    c0re_pgdir[0] = 0;
+
+    trace("check success: pgdir");
+}
+
+static void check_c0re_pgdir()
+{
+    pte_t *ptep;
+    
+    int i;
+    
+    for (i = 0; i < c0re_npage; i += PAGE_SIZE) {
+        assert((ptep = get_pte(c0re_pgdir, (uintptr_t)KADDR(i), 0)) != NULL);
+        assert(PTE_ADDR(*ptep) == i);
+    }
+
+    assert(PDE_ADDR(c0re_pgdir[PD_INDEX(KERNEL_VPT)]) == PADDR(c0re_pgdir));
+
+    assert(c0re_pgdir[0] == 0);
+
+    page_t *p;
+    p = palloc(1);
+    assert(page_insert(c0re_pgdir, p, 0x100, PTE_FLAG_W) == 0);
+    assert(page_getRef(p) == 1);
+    assert(page_insert(c0re_pgdir, p, 0x100 + PAGE_SIZE, PTE_FLAG_W) == 0);
+    assert(page_getRef(p) == 2);
+
+    const char *str = "ucore: Hello world!!";
+    strcpy((void *)0x100, str);
+    assert(strcmp((void *)0x100, (void *)(0x100 + PAGE_SIZE)) == 0);
+
+    *(char *)(page2kva(p) + 0x100) = '\0';
+    assert(strlen((const char *)0x100) == 0);
+
+    pfree(p);
+    pfree(pde2page(c0re_pgdir[0]));
+    c0re_pgdir[0] = 0;
+
+    trace("check success: c0re_pgdir");
 }

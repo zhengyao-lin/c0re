@@ -44,7 +44,7 @@ SECTIONS {
 		*(.data)
 	}
 
-	/* PROVIDE(bss_begin = .); */
+	PROVIDE(bss_begin = .);
 
 	.bss : {
 		*(.bss)

@@ -14,7 +14,7 @@ void _panic(char *file, int line, const char *fmt, ...);
 
 #define assert(cond) \
     if (!(cond)) { \
-        panic("assertion error: %s\n", #cond); \
+        panic("assertion error: %s", #cond); \
     }
     
 #define DBG_TAB "   "

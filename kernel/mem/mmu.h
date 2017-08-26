@@ -89,6 +89,8 @@
 
 #ifndef __ASSEMBLER__
 
+    #include "pub/com.h"
+
     /* gate descriptor for interrupts and traps */
     typedef struct {
         unsigned gd_off_15_0: 16;        // low 16 bits of offset in segment
@@ -266,7 +268,9 @@
 
 #ifndef __ASSEMBLER__
 
+    #include "pub/com.h"
     #include "pub/atomic.h"
+    #include "pub/dllist.h"
 
     typedef uintptr_t pte_t;
     typedef uintptr_t pde_t;
@@ -299,7 +303,14 @@
         unsigned int nfree;             // number of free pages(or the real size of the page block)
         struct page_t_tag *prev;
         struct page_t_tag *next;
+        
+        dllist_t pra_link;              // used for pra (page replace algorithm)
+        uintptr_t pra_vaddr;            // used for pra (page replace algorithm)
     } page_t;
+    
+    // convert dllist node to page
+    #define dll2page(dll, member) \
+        to_struct((dll), page_t, member)
 
     /* flags describing the status of a page frame */
     #define PAGE_FLAG_RESV              0 // the page is reserved for kernel and cannot be allocated
@@ -316,8 +327,9 @@
     #define page_clearFlags(p)          ((p)->flags = 0)
 
     #define page_clearRef(p)            ((p)->ref = 0)
-    #define page_incRef(p)              ((p)->ref++)
-    #define page_decRef(p)              ((p)->ref--)
+    #define page_incRef(p)              (++(p)->ref)
+    #define page_decRef(p)              (--(p)->ref)
+    #define page_getRef(p)              ((p)->ref)
 
     // a linear address 'la' has a three-part structure as follows:
     //

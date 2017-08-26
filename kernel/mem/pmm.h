@@ -17,10 +17,19 @@ typedef struct {
     void (*free)(page_t *);
     
     size_t (*nfree)(); // total free page count
+    
+    void (*check)();
 } page_allocator_t;
 
-page_t *c0re_pages;
-size_t c0re_npage;
+typedef struct {
+    page_t *freed;              // free page header
+    unsigned int nfree;         // # of free pages in this free list(!!NOTE NOT # of free blocks)
+} free_area_t;
+
+extern page_t *c0re_pages;
+extern size_t c0re_npage;
+extern pde_t *c0re_pgdir;
+extern uintptr_t c0re_pgdir_pa;
 
 /**
  * PADDR - takes a kernel virtual address (an address that points above KERNBASE),
@@ -100,5 +109,31 @@ page_t *pde2page(pde_t pde)
 }
 
 void pmm_init();
+
+pte_t *get_pte(pde_t *pgdir, uintptr_t la, bool create);
+
+page_t *palloc(size_t n);
+void pfree(page_t *base);
+size_t nfpage(); // # of free pages
+
+C0RE_INLINE
+page_t *palloc_s(size_t n)
+{
+    page_t *npg = palloc(n);
+    
+    if (!npg) {
+        panic("unable to alloc page");
+    }
+    
+    return npg;
+}
+
+void *kmalloc(size_t n);
+void kfree(void *ptr, size_t n);
+
+page_t *pgdir_palloc(pde_t *pgdir, uintptr_t la, uint32_t perm);
+int page_insert(pde_t *pgdir, page_t *page, uintptr_t la, uint32_t perm);
+void page_remove(pde_t *pgdir, uintptr_t la);
+void tlb_invalidate(pde_t *pgdir, uintptr_t la);
 
 #endif

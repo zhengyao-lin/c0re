@@ -5,7 +5,9 @@
 #include "lib/io.h"
 #include "lib/debug.h"
 #include "intr/trap.h"
+
 #include "mem/mmu.h"
+#include "mem/vmm.h"
 
 #include "driver/console.h"
 #include "driver/clock.h"
@@ -44,14 +46,39 @@ void idt_init()
 //     return (tf->tf_cs == (uint16_t)KERNEL_CS);
 // }
 
+C0RE_INLINE
+int handle_page_fault(trapframe_t *tf)
+{
+    extern vma_set_t *c0re_check_vma_set;
+    
+    // print_pgfault(tf);
+    
+    // NOTE: currently only used in check?
+    if (c0re_check_vma_set) {
+        return vmm_doPageFault(c0re_check_vma_set, tf->tf_err, rcr2());
+    }
+    
+    panic("unhandled page fault");
+    return -1;
+}
+
 trapframe_t switchk2u, *switchu2k;
 
 /* trap_dispatch - dispatch based on what type of trap occurred */
 static void dispatch(trapframe_t *tf)
 {
-    int c;
+    int c, ret;
 
     switch (tf->tf_trapno) {
+        case TRAPNO_PGFLT:
+            // page fault
+            // trace("page fault!");
+            if ((ret = handle_page_fault(tf)) != 0) {
+                panic("unable to handle page fault error: %e", ret);
+            }
+            
+            break;
+        
         case IRQ_OFFSET + IRQ_TIMER:
             // trace("timer");
             // TODO: finish after clock is finished

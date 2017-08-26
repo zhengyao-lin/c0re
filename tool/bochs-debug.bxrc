@@ -7,6 +7,8 @@ vgaromimage: file=$BXSHARE/VGABIOS-lgpl-latest
 ata0-master: type=disk, path="bin/c0re.img", mode=flat, cylinders=1, heads=1, spt=1
 ata0-slave: type=disk, path="bin/swap.img", mode=flat
 
+gdbstub: enabled=1, port=1234, text_base=0, data_base=0, bss_base=0
+
 # choose the boot disk
 boot: disk
 

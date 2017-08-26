@@ -1,4 +1,5 @@
 #include "pub/com.h"
+#include "pub/x86.h"
 
 #include "mem/ffit.h"
 #include "mem/mmu.h"
@@ -6,15 +7,12 @@
 
 #include "lib/debug.h"
 
-/* first-fir page allocator */
+/* first-fit page allocator */
 
 extern const page_allocator_t page_ffit_allocator;
 
 /* free_area_t - maintains a doubly linked list to record free (unused) pages */
-static struct {
-    page_t *freed;              // free page header
-    unsigned int nfree;        // # of free pages in this free list(!!NOTE NOT # of free blocks)
-} free_area;
+free_area_t free_area;
 
 #define _FREED (free_area.freed)
 #define _NFREE (free_area.nfree)
@@ -66,7 +64,7 @@ static void ffit_addMem(page_t *base, size_t n)
     page_t *p, *end = base + n;
     
     for (p = base; p != end; p++) {
-        assert(page_isReserved(p)); // ??
+        // assert(page_isReserved(p)); // ??
         
         page_clearRef(p);
         page_clearFlags(p);
@@ -81,10 +79,10 @@ static void ffit_addMem(page_t *base, size_t n)
 }
 
 // alloc using first-fit algorithm
-static page_t *ffit_alloc(size_t n)
+static page_t *ffit_alloc(size_t n) // n is the number of pages
 {
     assert(n);
-    
+
     // no enough page
     if (n > _NFREE) return NULL;
     
@@ -104,7 +102,7 @@ static page_t *ffit_alloc(size_t n)
         if (found->nfree > n) { // cut the block
             page_t *rest = found + n;
             page_setFree(rest); // TODO: possible bug in the original code
-            rest->nfree = rest->nfree - n;
+            rest->nfree = found->nfree - n;
             _ffit_dllist_append(rest);
         }
         
@@ -114,12 +112,16 @@ static page_t *ffit_alloc(size_t n)
         page_resetFree(found);
     }
     
+    // if (found)
+    //    trace("*** allocating %p %d", found, found->nfree);
+    
     return found;
 }
 
 // page must be allocated
 static void ffit_free(page_t *page /* , size_t n (n is loged in line 103) */)
 {
+    // trace("*** freeing %p %d", page, page->nfree);
     assert(page && page->nfree);
     
     size_t n = page->nfree;
@@ -141,10 +143,12 @@ static void ffit_free(page_t *page /* , size_t n (n is loged in line 103) */)
         if (page + page->nfree == p) { // page -- p
             page->nfree += p->nfree;
             page_resetFree(p);
+            p->nfree = 0;
             _ffit_dllist_remove(p);
         } else if (p + p->nfree == page) { // p -- page
             p->nfree += page->nfree;
             page_resetFree(page);
+            page->nfree = 0;
             page = p;
             _ffit_dllist_remove(p); // so that you don't re-add it below
         }
@@ -159,6 +163,80 @@ static size_t ffit_nfree()
     return _NFREE;
 }
 
+static void check_basic()
+{
+    page_t *p0, *p1, *p2;
+    
+    p0 = p1 = p2 = NULL;
+    
+    assert((p0 = palloc(1)) != NULL);
+    assert((p1 = palloc(1)) != NULL);
+    assert((p2 = palloc(1)) != NULL);
+
+    assert(p0 != p1 && p0 != p2 && p1 != p2);
+    assert(page_getRef(p0) == 0 && page_getRef(p1) == 0 && page_getRef(p2) == 0);
+
+    assert(page2pa(p0) < c0re_npage * PAGE_SIZE);
+    assert(page2pa(p1) < c0re_npage * PAGE_SIZE);
+    assert(page2pa(p2) < c0re_npage * PAGE_SIZE);
+    
+    page_t *freed = _FREED;
+    _FREED = NULL;
+
+    unsigned int nfree = _NFREE;
+    _NFREE = 0;
+
+    assert(palloc(1) == NULL);
+
+    pfree(p0);
+    pfree(p1);
+    pfree(p2);
+    assert(_NFREE == 3);
+
+    assert((p0 = palloc(1)) != NULL);    
+    assert((p1 = palloc(1)) != NULL);
+    assert((p2 = palloc(1)) != NULL);
+
+    assert(palloc(1) == NULL);
+    assert(_FREED == NULL);
+
+    pfree(p0);
+    assert(_NFREE);
+
+    page_t *p;
+    assert((p = palloc(1)) == p0);
+    assert(palloc(1) == NULL);
+    assert(_NFREE == 0);
+    
+    _FREED = freed;
+    _NFREE = nfree;
+
+    pfree(p0);
+    pfree(p1);
+    pfree(p2);
+}
+
+static void ffit_check()
+{    
+    int count = 0, total = 0;
+
+    page_t *cur, *prev = NULL;
+    
+    for (cur = _FREED; cur; cur = cur->next) {
+        assert(!prev || cur->prev == prev);
+        assert(page_isFree(cur));
+        
+        count++;
+        total += cur->nfree;
+        
+        prev = cur;
+    }
+
+    assert(total == nfpage());
+
+    check_basic();
+}
+
 const page_allocator_t page_ffit_allocator = {
     .name = "ffit",
     .init = ffit_init,
@@ -167,5 +245,7 @@ const page_allocator_t page_ffit_allocator = {
     .alloc = ffit_alloc,
     .free = ffit_free,
     
-    .nfree = ffit_nfree
+    .nfree = ffit_nfree,
+    
+    .check = ffit_check
 };
